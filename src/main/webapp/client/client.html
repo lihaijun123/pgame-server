@@ -2,56 +2,81 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    Netty WebSocket 时间服务器
 </head>
 <br>
 <body>
 <br>
-<script type="text/javascript">
-    var socket;
-    if (!window.WebSocket) {
-        window.WebSocket = window.MozWebSocket;
-    }
-    if (window.WebSocket) {
-        socket = new WebSocket("ws://localhost:8080/websocket");
-        socket.onmessage = function (event) {
-            var ta = document.getElementById('responseText');
-            ta.value = "";
-            ta.value = event.data
-        };
-        socket.onopen = function (event) {
-            var ta = document.getElementById('responseText');
-            ta.value = "打开WebSocket服务正常，浏览器支持WebSocket!";
-        };
-        socket.onclose = function (event) {
-            var ta = document.getElementById('responseText');
-            ta.value = "";
-            ta.value = "WebSocket 关闭!";
-        };
-    }
-    else {
-        alert("抱歉，您的浏览器不支持WebSocket协议!");
-    }
-
-    function send(message) {
-        if (!window.WebSocket) {
-            return;
-        }
-        if (socket.readyState == WebSocket.OPEN) {
-            socket.send(message);
-        }
-        else {
-            alert("WebSocket连接没有建立成功!");
-        }
-    }
-</script>
 <form onsubmit="return false;">
-    <input type="text" name="message" value="Netty最佳实践"/>
-    <br><br>
-    <input type="button" value="发送WebSocket请求消息" onclick="send(this.form.message.value)"/>
+    <h3>客户端测试</h3>
     <hr color="blue"/>
-    <h3>服务端返回的应答消息</h3>
+	<table>
+		<tr>
+			<td>
+				<input id="ctlBtn" type="button" value="控制其他设备"/>
+			</td>
+			<td>
+    			<input id="groupId" type="text" name="message" readonly="readonly" placeholder="返回识别码"/>
+			</td>
+		</tr>
+		<tr>
+			<td>
+			    <input id="joinBtn" type="button" value="准许其他设备控制"/>
+			</td>
+			<td>
+			    <input id="groupIdIpt" type="text" placeholder="在此输入设备码"/>
+			</td>
+		</tr>
+		<tr>
+			<td colspan="2">
+				<textarea id="chatMsgTt" rows="10" cols="50"></textarea>
+			</td>
+		</tr>
+		<tr>
+			<td colspan="2">
+				<input id="chatBtn" type="button" value="群发消息"/>
+			</td>
+		</tr>
+	</table>
+    <!-- 
+    <input type="button" value="发送WebSocket请求消息" onclick="wsclient.send(this.form.message.value)"/>
+     -->
+    <hr/>
+    <h3>日志</h3>
     <textarea id="responseText" style="width:500px;height:300px;"></textarea>
 </form>
+<script src="./jquery-1.11.1.min.js"></script>
+<script src="./client.js"></script>
+<script>
+	$(function(){
+		$("#ctlBtn").click(function(){
+			var msg = {};
+			msg["type"] = 1;
+			msg["groupId"] = "";
+			msg["body"] = "";
+			wsclient.send(msg);
+		});
+		$("#joinBtn").click(function(){
+			var msg = {};
+			msg["type"] = 2;
+			msg["groupId"] = $("#groupIdIpt").val();
+			msg["body"] = "";
+			wsclient.send(msg);
+		});
+		
+		$("#chatBtn").click(function(){
+			var groupId = $("#groupId").val();
+			if(!groupId){
+				alert("请点击'控制其他设备'按钮获取识别码");
+			} else {
+				var msg = {};
+				msg["type"] = 3;
+				msg["groupId"] = groupId;
+				msg["body"] = $("#chatMsgTt").val();
+				wsclient.send(msg);
+			}
+		});
+	});
+
+</script>
 </body>
 </html>

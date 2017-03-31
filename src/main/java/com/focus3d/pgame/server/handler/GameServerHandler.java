@@ -2,9 +2,11 @@ package com.focus3d.pgame.server.handler;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelId;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -21,7 +23,16 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
 import io.netty.util.CharsetUtil;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
+
+import net.sf.json.JSONObject;
+
+import com.focus3d.pgame.constant.MessageType;
+import com.focus3d.pgame.protocal.GameMessage;
 /**
  * *
  * @author lihaijun
@@ -29,10 +40,18 @@ import java.util.logging.Logger;
  */
 public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	
-	private static final Logger logger = Logger.getLogger(GameServerHandler.class.getName());
-	   
+	private static final Logger log = Logger.getLogger(GameServerHandler.class.getName());
+	private String serverIp;
+	private int serverPort;
 	private WebSocketServerHandshaker handshaker;
+	//ç”¨æˆ·ç»„
+	public static Map<String, List<Channel>> userGroup = new ConcurrentHashMap<String, List<Channel>>();
 	
+	public GameServerHandler(String serverIp, int serverPort) {
+		this.serverIp = serverIp;
+		this.serverPort = serverPort;
+	}
+
 	@Override
 	protected void channelRead0(ChannelHandlerContext ctx, Object msg) throws Exception {
 		if(msg instanceof FullHttpRequest){
@@ -46,6 +65,37 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
 		ctx.flush();
 	}
+	
+	@Override
+	public void channelActive(ChannelHandlerContext ctx) throws Exception {
+		Channel channel = ctx.channel();
+		log.info("client id:" + channel.id() + " join in");
+	}
+	/**
+	 * 
+	 * *
+	 */
+	@Override
+	public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+		Channel channel = ctx.channel();
+		ChannelId id = channel.id();
+		for(Map.Entry<String, List<Channel>> g : userGroup.entrySet()){
+			List<Channel> c = g.getValue();
+			for (Channel ch : c) {
+				if(ch.id().toString().equals(id.toString())){
+					c.remove(ch);
+					log.info("client id:" + id + " leave from group-" + g.getKey());
+					log.info("group size:" + c.size());
+					break;
+				}
+			}
+			/*if(c.isEmpty()){
+				userGroup.remove(g.getKey());
+			}*/
+		}
+		log.info("client id:" + id + " close");
+		ctx.close();
+	}
 	/**
 	 * *
 	 * @param ctx
@@ -53,13 +103,13 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	 * @throws Exception
 	 */
 	private void handleHttpRequest(ChannelHandlerContext ctx, FullHttpRequest req) throws Exception {
-		// Èç¹ûHTTP½âÂëÊ§°Ü£¬·µ»ØHHTPÒì³£
+		// å¦‚æœHTTPè§£ç å¤±è´¥ï¼Œè¿”å›HHTPå¼‚å¸¸
 		if(!req.decoderResult().isSuccess()  || (!"websocket".equals(req.headers().get("Upgrade")))){
 			sendHttpResponse(ctx, req, new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST));
 			return;
 		}
-		// ¹¹ÔìÎÕÊÖÏìÓ¦·µ»Ø£¬±¾»ú²âÊÔ
-		WebSocketServerHandshakerFactory wsFactory = new WebSocketServerHandshakerFactory("ws://localhost:8080/websocket", null, false);
+		// æ„é€ æ¡æ‰‹å“åº”è¿”å›ï¼Œæœ¬æœºæµ‹è¯•
+		WebSocketServerHandshakerFactory wsFactory = new WebSocketServerHandshakerFactory("ws://" + serverIp + ":" + serverPort + "/websocket", null, false);
 		handshaker = wsFactory.newHandshaker(req);
 		if(handshaker == null){
 			WebSocketServerHandshakerFactory.sendUnsupportedVersionResponse(ctx.channel());
@@ -72,27 +122,115 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	 * @param ctx
 	 * @param frame
 	 */
-	private void handleWebSocketFrame(ChannelHandlerContext ctx, WebSocketFrame frame) {
-		// ÅĞ¶ÏÊÇ·ñÊÇ¹Ø±ÕÁ´Â·µÄÖ¸Áî
+	private void handleWebSocketFrame(final ChannelHandlerContext ctx, WebSocketFrame frame) {
+		// åˆ¤æ–­æ˜¯å¦æ˜¯å…³é—­é“¾è·¯çš„æŒ‡ä»¤
+		Channel channel = ctx.channel();
 		if (frame instanceof CloseWebSocketFrame) {
-			handshaker.close(ctx.channel(), (CloseWebSocketFrame) frame.retain());
+			handshaker.close(channel, (CloseWebSocketFrame) frame.retain());
 			return;
 		}
-		// ÅĞ¶ÏÊÇ·ñÊÇPingÏûÏ¢
+		// åˆ¤æ–­æ˜¯å¦æ˜¯Pingæ¶ˆæ¯
 		if (frame instanceof PingWebSocketFrame) {
-			ctx.channel().write(new PongWebSocketFrame(frame.content().retain()));
+			channel.write(new PongWebSocketFrame(frame.content().retain()));
 			return;
 		}
-		//±¾Àı³Ì½öÖ§³ÖÎÄ±¾ÏûÏ¢£¬²»Ö§³Ö¶ş½øÖÆÏûÏ¢
+		//æœ¬ä¾‹ç¨‹ä»…æ”¯æŒæ–‡æœ¬æ¶ˆæ¯ï¼Œä¸æ”¯æŒäºŒè¿›åˆ¶æ¶ˆæ¯
 		if (!(frame instanceof TextWebSocketFrame)) {
 			throw new UnsupportedOperationException(String.format("%s frame types not supported", frame.getClass().getName()));
 		}
-		// ·µ»ØÓ¦´ğÏûÏ¢
+		// è¿”å›åº”ç­”æ¶ˆæ¯
 		String request = ((TextWebSocketFrame) frame).text();
-		if (logger.isLoggable(java.util.logging.Level.FINE)) {
-			logger.fine(String.format("%s received %s", ctx.channel(), request));
+		String response = "";
+		try {
+			GameMessage msg = (GameMessage)JSONObject.toBean(JSONObject.fromObject(request), GameMessage.class);
+			int type = msg.getType();
+			String groupId = msg.getGroupId();
+			if(type == MessageType.CREATE_GROUP.getCode()){
+				boolean hCreateGroup = false;
+				for(Map.Entry<String, List<Channel>> g : userGroup.entrySet()){
+					List<Channel> c = g.getValue();
+					for (Channel ch : c) {
+						if(channel.id().toString().equals(ch.id().toString())){
+							response = createResponseMessage(MessageType.CREATE_GROUP, g.getKey(), c.size(), "å·²ç»è·å–è¿‡è¯†åˆ«ç ,ä¸å¯ä»¥é‡å¤è·å–");
+							log.info("client id:" + ch.id().toString() + " have create group, groupId:" + g.getKey());
+							hCreateGroup = true;
+							break;
+						}
+					}
+					if(hCreateGroup){
+						break;
+					}
+				}
+				if(!hCreateGroup){
+					String time = String.valueOf(System.currentTimeMillis());
+					groupId = time.substring(time.length() - 8, time.length());
+					userGroup.put(groupId, new ArrayList<Channel>());
+					List<Channel> userList = userGroup.get(groupId);
+					userList.add(channel);
+					response = createResponseMessage(MessageType.CREATE_GROUP, groupId, userList.size(), "åˆ›å»ºä¸€ä¸ªç»„");
+				}
+				channel.writeAndFlush(new TextWebSocketFrame(response));
+				
+			} else if(type == MessageType.JOIN_GROUP.getCode()){
+				List<Channel> userList = userGroup.get(groupId);
+				if(userList == null || userList.isEmpty()){
+					response = createResponseMessage(MessageType.JOIN_GROUP, groupId, 0, "ç”¨æˆ·ç»„ä¸å­˜åœ¨");
+				} else {
+					boolean hJoinGroup = false;
+					for (Channel ch : userList) {
+						if(channel.id().toString().equals(ch.id().toString())){
+							hJoinGroup = true;
+							break;
+						}
+					}
+					if(!hJoinGroup){
+						userList.add(channel);
+						log.info("client id:" + channel.id() + " join group:" + groupId + ", group size:" + userList.size());
+						response = createResponseMessage(MessageType.JOIN_GROUP, groupId, userList.size(), "åŠ å…¥æˆåŠŸ");
+					} else {
+						response = createResponseMessage(MessageType.JOIN_GROUP, groupId, userList.size(), "å·²ç»åŠ å…¥");
+					}
+				}
+				channel.writeAndFlush(new TextWebSocketFrame(response));
+				
+			} else if(type == MessageType.GROUP_MESSAGE.getCode()){
+				List<Channel> userList = userGroup.get(groupId);
+				if(userList != null && !userList.isEmpty()){
+					for (Channel ch : userList) {
+						if(!channel.id().toString().equals(ch.id().toString())){
+							//response = createResponseMessage(MessageType.GROUP_MESSAGE, groupId, request);
+							msg.setStatus(0);
+							msg.setUserCount(userList.size());
+							ch.writeAndFlush(new TextWebSocketFrame(JSONObject.fromObject(msg).toString()));
+						}
+					}
+				}
+			} else {
+				response = createResponseMessage(MessageType.CREATE_GROUP, "", 0, "");
+				channel.writeAndFlush(new TextWebSocketFrame(response));
+			}
+		} catch (Exception e) {
+			response = createResponseMessage(MessageType.CREATE_GROUP, "", 0, "");
+			channel.writeAndFlush(new TextWebSocketFrame(response));
 		}
-		ctx.channel().write(new TextWebSocketFrame(request + " , »¶Ó­Ê¹ÓÃNetty WebSocket·şÎñ£¬ÏÖÔÚÊ±¿Ì£º" + new java.util.Date().toString()));
+		if (log.isLoggable(java.util.logging.Level.FINE)) {
+			log.fine(String.format("%s received %s", channel, request));
+		}
+	}
+	/**
+	 * *
+	 * @param type
+	 * @param groupId
+	 * @param body
+	 * @return
+	 */
+	private String createResponseMessage(MessageType type, String groupId, int userCount, String body){
+		GameMessage message = new GameMessage();
+		message.setType(type.getCode());
+		message.setGroupId(groupId);
+		message.setBody(body);
+		message.setUserCount(userCount);
+		return JSONObject.fromObject(message).toString();
 	}
 	/**
 	 * *
@@ -100,15 +238,16 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	 * @param req
 	 * @param res
 	 */
+	@SuppressWarnings("deprecation")
 	private static void sendHttpResponse(ChannelHandlerContext ctx, FullHttpRequest req, FullHttpResponse res) {
-		 // ·µ»ØÓ¦´ğ¸ø¿Í»§¶Ë
+		 // è¿”å›åº”ç­”ç»™å®¢æˆ·ç«¯
 		if(res.getStatus().code() != 200){
 			ByteBuf buf = Unpooled.copiedBuffer(res.getStatus().toString(), CharsetUtil.UTF_8);
 			res.content().writeBytes(buf);
 			buf.release();
 			HttpUtil.setContentLength(res, res.content().readableBytes());
 		}
-		// Èç¹ûÊÇ·ÇKeep-Alive£¬¹Ø±ÕÁ¬½Ó
+		// å¦‚æœæ˜¯éKeep-Aliveï¼Œå…³é—­è¿æ¥
 		ChannelFuture f = ctx.channel().writeAndFlush(res);
 		if(!HttpUtil.isKeepAlive(req) || res.status().code() != 200){
 			 f.addListener(ChannelFutureListener.CLOSE);
@@ -120,6 +259,4 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 		cause.printStackTrace();
 		ctx.close();
 	}
-
-	
 }
