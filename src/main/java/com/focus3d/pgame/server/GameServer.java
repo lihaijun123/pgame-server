@@ -22,7 +22,7 @@ import com.focus3d.pgame.server.handler.GameServerHandler;
  */
 public class GameServer {
 	
-	public static final String SERVER_IP = "172.17.13.77";
+	public static final String SERVER_IP = "121.196.221.18";
 	public static final int SERVER_PORT = 8080;
 	/**
 	 * *
