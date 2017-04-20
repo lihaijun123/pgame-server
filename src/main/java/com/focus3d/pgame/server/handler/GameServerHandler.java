@@ -81,21 +81,50 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	public void channelInactive(ChannelHandlerContext ctx) throws Exception {
 		Channel channel = ctx.channel();
 		String cId = channel.id().toString();
-		for(Map.Entry<String, List<User>> g : userGroup.entrySet()){
-			List<User> userList = g.getValue();
+		boolean isFind = false;
+		User creater = null;
+		String groupId = "";
+		for(Map.Entry<String, List<User>> group : userGroup.entrySet()){
+			List<User> userList = group.getValue();
+			groupId = group.getKey();
 			for (User user : userList) {
 				String ucId = user.getChannel().id().toString();
 				if(ucId.equals(cId)){
-					userList.remove(user);
-					log.info("client id:" + cId + " leave from group-" + g.getKey() + ",group size:" + userList.size());
+					isFind = true;
+					if(user.getType() == UserType.GROUP_CREATER.getType()){
+						creater = user;
+					} else {
+						userList.remove(user);
+						//通知退出
+						for (User u : userList) {
+							if(u.getChannel().isActive()){
+								String response = createResponseMessage(MessageType.CLOSE_RESPONSE, groupId, userList.size(), "关闭链接");
+								u.getChannel().writeAndFlush(new TextWebSocketFrame(response));
+							}
+						}
+						log.info("client id:" + cId + " leave from group-" + groupId + ",group size:" + userList.size());
+					}
 					break;
 				}
 			}
-			/*if(c.isEmpty()){
-				userGroup.remove(g.getKey());
-			}*/
+			if(isFind){
+				break;
+			}
 		}
-		log.info("client id:" + cId + " close connect");
+		if(creater != null){
+			List<User> userList = userGroup.get(creater.getGroupId());
+			if(userList != null && !userList.isEmpty()){
+				for (User user : userList) {
+					Channel ch = user.getChannel();
+					if(ch.isActive()){
+						ch.close();
+					}
+				}
+				userGroup.remove(groupId);
+				log.info("groupId:" + groupId + " clean up");
+			}
+		}
+		//log.info("client id:" + cId + " close connect");
 		ctx.close();
 	}
 	/**
@@ -174,13 +203,16 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 					if(!existInGroup(channel, userList)){
 						userList.add(new User(UserType.GROUP_MEMBER.getType(), groupId, channel));
 						log.info("client id:" + cId + " join in group:" + groupId + ", group size:" + userList.size());
-						response = createResponseMessage(MessageType.JOIN_GROUP, groupId, userList.size(), "加入成功");
+						for (User user : userList) {
+							response = createResponseMessage(MessageType.JOIN_GROUP, groupId, userList.size(), "加入成功");
+							user.getChannel().writeAndFlush(new TextWebSocketFrame(response));
+						}
 					} else {
 						log.info("client id:" + cId + " exist in group:" + groupId + ", group size:" + userList.size());
 						response = createResponseMessage(MessageType.JOIN_GROUP, groupId, userList.size(), "已经加入");
+						channel.writeAndFlush(new TextWebSocketFrame(response));
 					}
 				}
-				channel.writeAndFlush(new TextWebSocketFrame(response));
 			} else if(type == MessageType.GROUP_MESSAGE.getCode()){
 				List<User> userList = userGroup.get(groupId);
 				if(userList != null && !userList.isEmpty()){
@@ -191,11 +223,30 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 							msg.setStatus(0);
 							msg.setUserCount(userList.size());
 							user.getChannel().writeAndFlush(new TextWebSocketFrame(JSONObject.fromObject(msg).toString()));
-						} else {
-							log.info("no need send message to own");
 						}
 					}
 				}
+			} else if(type == MessageType.CLOSE_CONNECT.getCode()){
+				List<User> userList = userGroup.get(groupId);
+				User user = selectUser(channel, userList);
+				if(user.getType() == UserType.GROUP_MEMBER.getType()){
+					user.getChannel().close();
+					log.info("client[" + user.toString() + "] manual close connect");
+					//通知退出
+					/*for (User u : userList) {
+						if(u.getChannel().isActive()){
+							response = createResponseMessage(MessageType.CLOSE_RESPONSE, groupId, userList.size() - 1, "关闭链接");
+							u.getChannel().writeAndFlush(new TextWebSocketFrame(response));
+						}
+					}*/
+				} else {
+					log.info("group creater manual close connect, all group users count[" + userList.size() + "] need close connect");
+					for (User u : userList) {
+						log.info("#####group creater[" + user.toString() + "] manual close member[" + u.toString() + "] connect");
+						u.getChannel().close();
+					}
+				}
+				
 			} else {
 				response = createResponseMessage(MessageType.CREATE_GROUP, "", 0, "");
 				channel.writeAndFlush(new TextWebSocketFrame(response));
@@ -251,6 +302,7 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 		ctx.close();
 	}
 	
+	@SuppressWarnings("unused")
 	private boolean existInGroup(Channel channel, Map<String, List<User>> userGroup){
 		String cId = channel.id().toString();
 		boolean exist = false;
@@ -270,18 +322,6 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 		return exist;
 	}
 	
-	private boolean existInGroup(Channel channel, List<User> userList){
-		String cId = channel.id().toString();
-		boolean exist = false;
-		for (User user : userList) {
-			String ucId = user.getChannel().id().toString();
-			if(cId.equals(ucId)){
-				exist = true;
-				break;
-			}
-		}
-		return exist;
-	}
 	private User selectUser(Channel channel, Map<String, List<User>> userGroup){
 		String cId = channel.id().toString();
 		User rvUser = null;
@@ -294,6 +334,33 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 				}
 			}
 			if(rvUser != null){
+				break;
+			}
+		}
+		return rvUser;
+	}
+	
+
+	private boolean existInGroup(Channel channel, List<User> userList){
+		String cId = channel.id().toString();
+		boolean exist = false;
+		for (User user : userList) {
+			String ucId = user.getChannel().id().toString();
+			if(cId.equals(ucId)){
+				exist = true;
+				break;
+			}
+		}
+		return exist;
+	}
+	
+	private User selectUser(Channel channel, List<User> userList){
+		String cId = channel.id().toString();
+		User rvUser = null;
+		for (User user : userList) {
+			String ucId = user.getChannel().id().toString();
+			if(cId.equals(ucId)){
+				rvUser = user;
 				break;
 			}
 		}

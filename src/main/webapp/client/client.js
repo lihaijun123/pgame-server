@@ -8,42 +8,52 @@ var wsclient = (function($){
 	var _this = {};
 	
 	var socket;
-	if (!window.WebSocket) {
-		window.WebSocket = window.MozWebSocket;
-	}
-	if (window.WebSocket) {
-		socket = new WebSocket(url);
-		//服务器响应处理
-		socket.onmessage = function (event) {
-			var response = event.data;
-			var restext = jQuery.parseJSON(response);
-			var ta = document.getElementById('responseText');
-			ta.value = "";
-			ta.value = response;
-			if(restext.type === 1){
-				$("#groupId").val(restext.groupId);
+	
+	function send(msg){
+		if (socket != null && socket.readyState == WebSocket.OPEN) {
+			sendMessage(msg);
+		} else {
+			if (!window.WebSocket) {
+				window.WebSocket = window.MozWebSocket;
 			}
-			if(restext.type === 2){
-				$("#groupId").val(restext.groupId);
+			if (window.WebSocket) {
+				socket = new WebSocket(url);
+				//服务器响应处理
+				socket.onmessage = function (event) {
+					var response = event.data;
+					var restext = jQuery.parseJSON(response);
+					var ta = document.getElementById('responseText');
+					ta.value = "";
+					ta.value = response;
+					if(restext.type === 1){
+						$("#groupId").val(restext.groupId);
+					}
+					if(restext.type === 2){
+						$("#groupId").val(restext.groupId);
+					}
+					if(restext.type === 3){
+						$("#chatMsgTt").val(restext.body);
+					}
+					if(restext.type === 5){
+						$("#chatMsgTt").val(restext.body);
+					}
+				};
+				//链接成功
+				socket.onopen = function (event) {
+					var ta = document.getElementById('responseText');
+					ta.value = "打开WebSocket服务正常，浏览器支持WebSocket!";
+					sendMessage(msg);
+				};
+				//关闭连接
+				socket.onclose = function (event) {
+					socket = null;
+					alert("WebSocket 关闭!");
+				};
 			}
-			if(restext.type === 3){
-				$("#chatMsgTt").val(restext.body);
+			else {
+				alert("抱歉，您的浏览器不支持WebSocket协议!");
 			}
-		};
-		//链接成功
-		socket.onopen = function (event) {
-			var ta = document.getElementById('responseText');
-			ta.value = "打开WebSocket服务正常，浏览器支持WebSocket!";
-		};
-		//关闭连接
-		socket.onclose = function (event) {
-			var ta = document.getElementById('responseText');
-			ta.value = "";
-			ta.value = "WebSocket 关闭!";
-		};
-	}
-	else {
-		alert("抱歉，您的浏览器不支持WebSocket协议!");
+		}
 	}
 	/**
 	 * 发送消息
@@ -53,7 +63,7 @@ var wsclient = (function($){
 	 * body：可以为空
 	 * 
 	 */
-	function send(message) {
+	function sendMessage(message) {
 		if (!window.WebSocket) {
 			return;
 		}

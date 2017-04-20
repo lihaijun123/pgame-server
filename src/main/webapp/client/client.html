@@ -27,6 +27,11 @@
 			</td>
 		</tr>
 		<tr>
+			<td>
+			    <input id="closeBtn" type="button" value="断开连接"/>
+			</td>
+		</tr>
+		<tr>
 			<td colspan="2">
 				<textarea id="chatMsgTt" rows="10" cols="50"></textarea>
 			</td>
@@ -72,6 +77,19 @@
 				msg["type"] = 3;
 				msg["groupId"] = groupId;
 				msg["body"] = $("#chatMsgTt").val();
+				wsclient.send(msg);
+			}
+		});
+		
+		$("#closeBtn").click(function(){
+			var groupId = $("#groupId").val();
+			if(!groupId){
+				alert("请点击'控制其他设备'按钮获取识别码");
+			} else {
+				var msg = {};
+				msg["type"] = 4;
+				msg["groupId"] = groupId;
+				msg["body"] = "";
 				wsclient.send(msg);
 			}
 		});
