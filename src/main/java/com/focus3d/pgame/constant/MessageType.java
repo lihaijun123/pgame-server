@@ -8,7 +8,8 @@ public enum MessageType {
 	
 	CREATE_GROUP(1),
 	JOIN_GROUP(2),
-	GROUP_MESSAGE(3);
+	GROUP_MESSAGE(3),
+	CLOSE(4);
 	
 	int code;
 	

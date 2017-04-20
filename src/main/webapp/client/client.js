@@ -4,7 +4,7 @@
  * 
  */
 var wsclient = (function($){
-	var url = "ws://121.196.221.18:8080/websocket";
+	var url = "ws://172.17.13.77:8080/websocket";
 	var _this = {};
 	
 	var socket;

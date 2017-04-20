@@ -32,7 +32,9 @@ import java.util.logging.Logger;
 import net.sf.json.JSONObject;
 
 import com.focus3d.pgame.constant.MessageType;
+import com.focus3d.pgame.constant.UserType;
 import com.focus3d.pgame.protocal.GameMessage;
+import com.focus3d.pgame.user.User;
 /**
  * *
  * @author lihaijun
@@ -45,7 +47,7 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	private int serverPort;
 	private WebSocketServerHandshaker handshaker;
 	//用户组
-	public static Map<String, List<Channel>> userGroup = new ConcurrentHashMap<String, List<Channel>>();
+	public static Map<String, List<User>> userGroup = new ConcurrentHashMap<String, List<User>>();
 	
 	public GameServerHandler(String serverIp, int serverPort) {
 		this.serverIp = serverIp;
@@ -69,7 +71,7 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	@Override
 	public void channelActive(ChannelHandlerContext ctx) throws Exception {
 		Channel channel = ctx.channel();
-		log.info("client id:" + channel.id() + " join in");
+		log.info("client id:" + channel.id() + " connect");
 	}
 	/**
 	 * 
@@ -78,14 +80,14 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	@Override
 	public void channelInactive(ChannelHandlerContext ctx) throws Exception {
 		Channel channel = ctx.channel();
-		ChannelId id = channel.id();
-		for(Map.Entry<String, List<Channel>> g : userGroup.entrySet()){
-			List<Channel> c = g.getValue();
-			for (Channel ch : c) {
-				if(ch.id().toString().equals(id.toString())){
-					c.remove(ch);
-					log.info("client id:" + id + " leave from group-" + g.getKey());
-					log.info("group size:" + c.size());
+		String cId = channel.id().toString();
+		for(Map.Entry<String, List<User>> g : userGroup.entrySet()){
+			List<User> userList = g.getValue();
+			for (User user : userList) {
+				String ucId = user.getChannel().id().toString();
+				if(ucId.equals(cId)){
+					userList.remove(user);
+					log.info("client id:" + cId + " leave from group-" + g.getKey() + ",group size:" + userList.size());
 					break;
 				}
 			}
@@ -93,7 +95,7 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 				userGroup.remove(g.getKey());
 			}*/
 		}
-		log.info("client id:" + id + " close");
+		log.info("client id:" + cId + " close connect");
 		ctx.close();
 	}
 	/**
@@ -145,63 +147,52 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 			GameMessage msg = (GameMessage)JSONObject.toBean(JSONObject.fromObject(request), GameMessage.class);
 			int type = msg.getType();
 			String groupId = msg.getGroupId();
+			String cId = channel.id().toString();
 			if(type == MessageType.CREATE_GROUP.getCode()){
-				boolean hCreateGroup = false;
-				for(Map.Entry<String, List<Channel>> g : userGroup.entrySet()){
-					List<Channel> c = g.getValue();
-					for (Channel ch : c) {
-						if(channel.id().toString().equals(ch.id().toString())){
-							response = createResponseMessage(MessageType.CREATE_GROUP, g.getKey(), c.size(), "已经获取过识别码,不可以重复获取");
-							log.info("client id:" + ch.id().toString() + " have create group, groupId:" + g.getKey());
-							hCreateGroup = true;
-							break;
-						}
-					}
-					if(hCreateGroup){
-						break;
-					}
-				}
-				if(!hCreateGroup){
+				User user = selectUser(channel, userGroup);
+				if(user != null){
+					groupId = user.getGroupId();
+					response = createResponseMessage(MessageType.CREATE_GROUP, groupId, userGroup.get(groupId).size(), "已经获取过识别码,不可以重复获取");
+					ChannelId ucId = user.getChannel().id();
+					log.info("client id:" + ucId + " exist in group, groupId:" + groupId);
+				} else {
 					String time = String.valueOf(System.currentTimeMillis());
 					groupId = time.substring(time.length() - 8, time.length());
-					userGroup.put(groupId, new ArrayList<Channel>());
-					List<Channel> userList = userGroup.get(groupId);
-					userList.add(channel);
+					userGroup.put(groupId, new ArrayList<User>());
+					List<User> userList = userGroup.get(groupId);
+					User creater = new User(UserType.GROUP_CREATER.getType(), groupId, channel);
+					userList.add(creater);
+					log.info("group id:" + groupId + " create by user[" + creater.toString() + "]");
 					response = createResponseMessage(MessageType.CREATE_GROUP, groupId, userList.size(), "创建一个组");
 				}
 				channel.writeAndFlush(new TextWebSocketFrame(response));
-				
 			} else if(type == MessageType.JOIN_GROUP.getCode()){
-				List<Channel> userList = userGroup.get(groupId);
+				List<User> userList = userGroup.get(groupId);
 				if(userList == null || userList.isEmpty()){
 					response = createResponseMessage(MessageType.JOIN_GROUP, groupId, 0, "用户组不存在");
 				} else {
-					boolean hJoinGroup = false;
-					for (Channel ch : userList) {
-						if(channel.id().toString().equals(ch.id().toString())){
-							hJoinGroup = true;
-							break;
-						}
-					}
-					if(!hJoinGroup){
-						userList.add(channel);
-						log.info("client id:" + channel.id() + " join group:" + groupId + ", group size:" + userList.size());
+					if(!existInGroup(channel, userList)){
+						userList.add(new User(UserType.GROUP_MEMBER.getType(), groupId, channel));
+						log.info("client id:" + cId + " join in group:" + groupId + ", group size:" + userList.size());
 						response = createResponseMessage(MessageType.JOIN_GROUP, groupId, userList.size(), "加入成功");
 					} else {
+						log.info("client id:" + cId + " exist in group:" + groupId + ", group size:" + userList.size());
 						response = createResponseMessage(MessageType.JOIN_GROUP, groupId, userList.size(), "已经加入");
 					}
 				}
 				channel.writeAndFlush(new TextWebSocketFrame(response));
-				
 			} else if(type == MessageType.GROUP_MESSAGE.getCode()){
-				List<Channel> userList = userGroup.get(groupId);
+				List<User> userList = userGroup.get(groupId);
 				if(userList != null && !userList.isEmpty()){
-					for (Channel ch : userList) {
-						if(!channel.id().toString().equals(ch.id().toString())){
-							//response = createResponseMessage(MessageType.GROUP_MESSAGE, groupId, request);
+					for (User user : userList) {
+						String ucId = user.getChannel().id().toString();
+						if(!cId.equals(ucId)){
+							//群发消息给其他组成员
 							msg.setStatus(0);
 							msg.setUserCount(userList.size());
-							ch.writeAndFlush(new TextWebSocketFrame(JSONObject.fromObject(msg).toString()));
+							user.getChannel().writeAndFlush(new TextWebSocketFrame(JSONObject.fromObject(msg).toString()));
+						} else {
+							log.info("no need send message to own");
 						}
 					}
 				}
@@ -258,5 +249,54 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 	public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
 		cause.printStackTrace();
 		ctx.close();
+	}
+	
+	private boolean existInGroup(Channel channel, Map<String, List<User>> userGroup){
+		String cId = channel.id().toString();
+		boolean exist = false;
+		for(Map.Entry<String, List<User>> g : userGroup.entrySet()){
+			List<User> userList = g.getValue();
+			for (User user : userList) {
+				String ucId = user.getChannel().id().toString();
+				if(cId.equals(ucId)){
+					exist = true;
+					break;
+				}
+			}
+			if(exist){
+				break;
+			}
+		}
+		return exist;
+	}
+	
+	private boolean existInGroup(Channel channel, List<User> userList){
+		String cId = channel.id().toString();
+		boolean exist = false;
+		for (User user : userList) {
+			String ucId = user.getChannel().id().toString();
+			if(cId.equals(ucId)){
+				exist = true;
+				break;
+			}
+		}
+		return exist;
+	}
+	private User selectUser(Channel channel, Map<String, List<User>> userGroup){
+		String cId = channel.id().toString();
+		User rvUser = null;
+		for(Map.Entry<String, List<User>> g : userGroup.entrySet()){
+			List<User> userList = g.getValue();
+			for (User user : userList) {
+				String ucId = user.getChannel().id().toString();
+				if(cId.equals(ucId)){
+					rvUser = user;
+				}
+			}
+			if(rvUser != null){
+				break;
+			}
+		}
+		return rvUser;
 	}
 }
