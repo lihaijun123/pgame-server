@@ -186,7 +186,7 @@ public class GameServerHandler extends SimpleChannelInboundHandler<Object> {
 					log.info("client id:" + ucId + " exist in group, groupId:" + groupId);
 				} else {
 					String time = String.valueOf(System.currentTimeMillis());
-					groupId = time.substring(time.length() - 8, time.length());
+					groupId = time.substring(time.length() - 6, time.length());
 					userGroup.put(groupId, new ArrayList<User>());
 					List<User> userList = userGroup.get(groupId);
 					User creater = new User(UserType.GROUP_CREATER.getType(), groupId, channel);
